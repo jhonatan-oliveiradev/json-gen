@@ -59,11 +59,58 @@ describe("Liferay Headless document listing", () => {
 
   it("reports authentication failures from each endpoint rather than silently returning zero documents", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => denied(403)));
-    const result = await listFolderDocuments(77, "staging-green");
+    const result = await listFolderDocuments(77, "staging-green", ["SCL"]);
 
     expect(result.documents).toHaveLength(0);
-    expect(result.diagnostics).toHaveLength(3);
+    expect(result.diagnostics).toHaveLength(2);
     expect(result.diagnostics.every((item) => item.detail.includes("403"))).toBe(true);
+  });
+
+  it("finds an asset by a site search and accepts only its exact folder ID", async () => {
+    const mock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/document-folders/77/documents")) return apiResult([]);
+      if (url.includes("/sites/20124/documents") && url.includes("search=SCL")) {
+        return apiResult([
+          { id: 101, title: "SCL_750x500_1", documentFolderId: 77, contentUrl: "/documents/d/guest/scl_750x500_1-68" },
+          { id: 102, title: "SCL_750x500_1", documentFolderId: 88, contentUrl: "/documents/d/guest/scl_750x500_1-other" },
+          { id: 103, title: "SCL_750x500_1", contentUrl: "/documents/d/guest/scl_750x500_unknown" },
+        ]);
+      }
+      return apiResult([]);
+    });
+    vi.stubGlobal("fetch", mock);
+    const result = await listFolderDocuments(77, "staging-green", ["SCL"]);
+
+    expect(result.documents.map((doc) => doc.id)).toEqual([101]);
+    expect(result.documents[0].contentUrl).toContain("/documents/d/guest/scl_750x500_1-68");
+    expect(result.diagnostics[1]).toMatchObject({ rawCount: 3, mappedCount: 1 });
+    expect(mock.mock.calls.some((args) => String(args[0]).includes("filter="))).toBe(false);
+  });
+
+  it("does not assume an asset belongs to the folder when metadata has no documentFolderId", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
+      apiResult(String(input).includes("search=SCL")
+        ? [{ id: 201, title: "SCL_750x500_1", contentUrl: "/documents/d/guest/scl_750x500_1-68" }]
+        : [])));
+    const result = await listFolderDocuments(77, "staging-green", ["SCL"]);
+    expect(result.documents).toHaveLength(0);
+    expect(result.diagnostics[1]).toMatchObject({ rawCount: 1, mappedCount: 0 });
+  });
+
+  it("reveals useful HTTP 400 API response details instead of retrying unsupported filters", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("search=SCL")
+        ? {
+            ok: false,
+            status: 400,
+            headers: new Headers({ "content-type": "application/json" }),
+            json: async () => ({ title: "BAD_REQUEST", detail: "Search index is unavailable" }),
+          } as Response
+        : apiResult([])));
+    const result = await listFolderDocuments(77, "staging-green", ["SCL"]);
+    expect(result.diagnostics[1].detail).toContain("HTTP 400");
+    expect(result.diagnostics[1].detail).toContain("Search index is unavailable");
   });
 
   it("identifies redirected authentication responses", async () => {
