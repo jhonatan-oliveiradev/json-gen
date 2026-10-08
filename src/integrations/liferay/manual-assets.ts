@@ -36,7 +36,13 @@ export function parseDestinationUrls(input: string, expectedIatas: string[]): {
       continue;
     }
 
-    const title = decodeURIComponent(parsed.pathname.split("/").pop() ?? "");
+    let title: string;
+    try {
+      title = decodeURIComponent(parsed.pathname.split("/").pop() ?? "");
+    } catch {
+      errors.push("Nome do documento contém caracteres inválidos: " + token);
+      continue;
+    }
     const match = title.match(/^([a-zA-Z]{3})(?:[_-]|$)/);
     const iata = match?.[1].toUpperCase();
     if (!iata || !expected.has(iata)) {
