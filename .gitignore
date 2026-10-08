@@ -1,0 +1,10 @@
+node_modules/
+.next/
+out/
+.env*
+!.env.example
+coverage/
+*.log
+.DS_Store
+.superpowers/
+premium-audit.json
