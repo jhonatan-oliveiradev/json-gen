@@ -162,6 +162,11 @@ export function JsonGenWorkspace() {
     );
     const count = Object.keys(assignments).length;
 
+    if (errors.length > 0) {
+      setManualMessage(`Não foi possível associar as imagens: ${errors.join(" ")} Corrija as URLs e tente novamente.`);
+      return;
+    }
+
     if (count > 0) {
       setManualOverrides((current) => ({ ...current, ...assignments }));
       setAssets((current) => {
