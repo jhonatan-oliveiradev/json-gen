@@ -26,11 +26,26 @@ export function liferayConfigFor(environment: LiferayEnvironment) {
   }
 
   if (!baseUrl?.trim()) {
-    throw new Error(`Configure ${variable} na Vercel e faça um novo deploy para usar ${environment}.`);
+    throw new Error(`Configure ${variable} na Vercel (exemplo: https://www.smiles.com.br) e faça um novo deploy.`);
   }
-  const parsed = new URL(baseUrl);
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/") {
-    throw new Error(`A variável ${variable} deve conter somente a origem HTTPS do Liferay.`);
+
+  // Vercel values sometimes arrive copied with quotes or without a scheme.
+  // Normalize these harmless variations, but never change the intended host.
+  const trimmed = baseUrl.trim().replace(/^["']|["']$/g, "").trim();
+  const candidate = /^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(`${variable} contém um endereço inválido. Configure apenas o domínio HTTPS, sem aspas nem caminho (ex.: https://www.smiles.com.br).`);
+  }
+
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/" ||
+      !(parsed.hostname === "smiles.com.br" || parsed.hostname.endsWith(".smiles.com.br"))) {
+    throw new Error(`${variable} deve conter somente uma origem HTTPS de smiles.com.br, sem caminho, parâmetros nem credenciais.`);
+  }
+  if (!/^\d+$/.test(String(siteId))) {
+    throw new Error(`O site ID configurado para ${environment} é inválido: informe somente o ID numérico do site Liferay.`);
   }
 
   return {
