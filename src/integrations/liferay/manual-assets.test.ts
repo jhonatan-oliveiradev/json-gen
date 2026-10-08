@@ -7,7 +7,7 @@ describe("parseDestinationUrls", () => {
       "https://portal-green-stg-svc.smiles.com.br/documents/d/guest/scl_750x500_1-68",
       "https://portal-green-stg-svc.smiles.com.br/documents/d/guest/lim_750x500_01-4",
     ].join("\n");
-    const result = parseDestinationUrls(text, ["SCL", "LIM"], "staging");
+    const result = parseDestinationUrls(text, ["SCL", "LIM"], "staging-green");
     expect(result.errors).toEqual([]);
     expect(Object.keys(result.urls)).toEqual(["SCL", "LIM"]);
     expect(result.urls.SCL).toContain("scl_750x500_1-68");
@@ -24,6 +24,16 @@ describe("parseDestinationUrls", () => {
     const result = parseDestinationUrls(url, ["SCL"], "production");
     expect(result.urls).toEqual({});
     expect(result.errors[0]).toContain("staging");
+  });
+
+  it("keeps green and blue links separate", () => {
+    const green = "https://portal-green-stg-svc.smiles.com.br/documents/d/guest/scl_750x500_1-68";
+    const blue = "https://portal-blue-stg-svc.smiles.com.br/documents/d/guest/scl_750x500_1-68";
+    expect(parseDestinationUrls(green, ["SCL"], "staging-green").errors).toEqual([]);
+    expect(parseDestinationUrls(blue, ["SCL"], "staging-blue").errors).toEqual([]);
+    expect(parseDestinationUrls(green, ["SCL"], "staging-blue").errors[0]).toContain("Blue");
+    expect(parseDestinationUrls(blue, ["SCL"], "staging-green").errors[0]).toContain("Green");
+    expect(parseDestinationUrls("https://www.smiles.com.br/documents/d/guest/scl_750x500_1", ["SCL"], "staging-green").errors).toHaveLength(1);
   });
 
   it("rejects external domains, non-HTTPS and non-document paths", () => {
