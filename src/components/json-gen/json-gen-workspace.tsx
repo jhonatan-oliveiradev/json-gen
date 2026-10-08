@@ -16,7 +16,7 @@ type Resolution =
   | { status: "missing"; candidates: string[] }
   | { status: "ambiguous"; candidates: Array<{ id: number | string; title: string; url: string }> };
 
-type LiferayEnvironment = "production" | "staging";
+type LiferayEnvironment = "production" | "staging-green" | "staging-blue";
 
 type ResolveResponse =
   | { ok: true; folder: { id: number | string; name: string }; documentCount: number; resolutions: Record<string, Resolution> }
@@ -259,6 +259,7 @@ export function JsonGenWorkspace() {
                 <span className="text-sm font-semibold">Ambiente dos documentos Liferay</span>
                 <select
                   aria-label="Ambiente do Liferay"
+                  disabled={resolving}
                   className="h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                   value={environment}
                   onChange={(event) => {
@@ -272,11 +273,12 @@ export function JsonGenWorkspace() {
                   }}
                 >
                   <option value="production">Produção (www.smiles.com.br)</option>
-                  <option value="staging">Staging (portal-green-stg-svc)</option>
+                  <option value="staging-green">Staging Green</option>
+                  <option value="staging-blue">Staging Blue</option>
                 </select>
                 <span className="text-xs leading-5 text-muted-foreground">
                   O JSON usa a URL real retornada pelo Liferay. Publicar uma imagem no staging não garante que ela exista em produção.
-                  Para gerar URLs de produção, selecione Produção.
+                  Para gerar URLs de produção, selecione Produção; selecione Green ou Blue para homologar.
                 </span>
               </label>
             </div>
@@ -337,7 +339,7 @@ export function JsonGenWorkspace() {
               <textarea
                 aria-label="URLs das imagens do carrossel"
                 className="mt-3 min-h-24 w-full resize-y rounded-xl border border-input bg-background p-3 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
-                placeholder="https://portal-green-stg-svc.smiles.com.br/documents/d/guest/scl_750x500_1-68"
+                placeholder={environment === "production" ? "https://www.smiles.com.br/documents/d/guest/scl_750x500_1-68" : "Cole a URL real do documento no ambiente escolhido"}
                 value={manualInputs[activeCarousel] ?? ""}
                 onChange={(event) => { setManualInputs((current) => ({ ...current, [activeCarousel]: event.target.value })); setManualMessage(""); }}
               />

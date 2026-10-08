@@ -19,7 +19,7 @@ Depois da leitura, confirme as contagens exibidas. Para a campanha AER1525 usada
 
 ## 3. Configurar assets
 
-Escolha o **Ambiente dos documentos Liferay**: `Produção` (padrão, para JSON definitivo) ou `Staging` (somente testes). Cada ambiente usa sua base e site ID configurados; a URL de mídia retornada pela API é preservada sem trocar hostname. Publicar no staging não prova que o documento existe em produção.
+Escolha o **Ambiente dos documentos Liferay**: `Produção` (padrão, para JSON definitivo), `Staging Green` ou `Staging Blue` (somente testes). Cada ambiente usa sua base e site ID configurados; a URL de mídia retornada pela API é preservada sem trocar hostname. Publicar no staging não prova que o documento existe em produção.
 
 
 Para cada carrossel é sugerida uma pasta seguindo o padrão:

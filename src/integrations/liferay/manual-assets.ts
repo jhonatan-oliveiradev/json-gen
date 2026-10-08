@@ -3,7 +3,7 @@
  * is unavailable to the local app (for example, when browser SSO is required).
  * Never guess asset suffixes or silently match a URL to a different carousel.
  */
-export function parseDestinationUrls(input: string, expectedIatas: string[], environment: "production" | "staging" = "production"): {
+export function parseDestinationUrls(input: string, expectedIatas: string[], environment: "production" | "staging-green" | "staging-blue" = "production"): {
   urls: Record<string, string>;
   errors: string[];
 } {
@@ -31,9 +31,19 @@ export function parseDestinationUrls(input: string, expectedIatas: string[], env
       continue;
     }
 
-    // Staging URLs must never slip into an export intended for production.
-    if (environment === "production" && /(?:^|[-.])(?:stg|staging)(?:[-.]|$)/i.test(parsed.hostname)) {
-      errors.push("URL de staging não permitida em produção: " + token + ". Selecione Staging para testes.");
+    // Do not mix assets from production, green and blue in one export.
+    const hostname = parsed.hostname.toLowerCase();
+    const isStaging = /(?:^|[-.])(?:stg|staging)(?:[-.]|$)/.test(hostname);
+    if (environment === "production" && isStaging) {
+      errors.push("URL de staging não permitida em produção: " + token);
+      continue;
+    }
+    if (environment === "staging-green" && (!isStaging || !hostname.includes("green") || hostname.includes("blue"))) {
+      errors.push("A URL não pertence ao Staging Green: " + token);
+      continue;
+    }
+    if (environment === "staging-blue" && (!isStaging || !hostname.includes("blue") || hostname.includes("green"))) {
+      errors.push("A URL não pertence ao Staging Blue: " + token);
       continue;
     }
 

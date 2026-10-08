@@ -1,21 +1,41 @@
 import { normalizeKey } from "@/domain/campaign/normalize";
 import type { LiferayDocument, LiferayFolder } from "./types";
 
-export type LiferayEnvironment = "production" | "staging";
+export type LiferayEnvironment = "production" | "staging-green" | "staging-blue";
 
-function liferayConfigFor(environment: LiferayEnvironment) {
-  const production = environment === "production";
+export function liferayConfigFor(environment: LiferayEnvironment) {
+  const siteId = environment === "production"
+    ? (process.env.LIFERAY_SITE_ID_PRODUCTION ?? process.env.LIFERAY_SITE_ID ?? "20124")
+    : (process.env.LIFERAY_SITE_ID_STAGING ?? process.env.LIFERAY_SITE_ID ?? "20124");
+
+  let baseUrl: string | undefined;
+  let variable: string;
+  switch (environment) {
+    case "production":
+      baseUrl = process.env.LIFERAY_BASE_URL ?? "https://www.smiles.com.br";
+      variable = "LIFERAY_BASE_URL";
+      break;
+    case "staging-green":
+      baseUrl = process.env.LIFERAY_STAGING_GREEN_BASE_URL;
+      variable = "LIFERAY_STAGING_GREEN_BASE_URL";
+      break;
+    case "staging-blue":
+      baseUrl = process.env.LIFERAY_STAGING_BLUE_BASE_URL;
+      variable = "LIFERAY_STAGING_BLUE_BASE_URL";
+      break;
+  }
+
+  if (!baseUrl?.trim()) {
+    throw new Error(`Configure ${variable} na Vercel e faça um novo deploy para usar ${environment}.`);
+  }
+  const parsed = new URL(baseUrl);
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/") {
+    throw new Error(`A variável ${variable} deve conter somente a origem HTTPS do Liferay.`);
+  }
+
   return {
-    baseUrl: (
-      production
-        ? process.env.LIFERAY_BASE_URL ?? "https://www.smiles.com.br"
-        : process.env.LIFERAY_STAGING_BASE_URL ?? "https://portal-green-stg-svc.smiles.com.br"
-    ).replace(/\/$/, ""),
-    siteId: (
-      production
-        ? process.env.LIFERAY_SITE_ID_PRODUCTION ?? process.env.LIFERAY_SITE_ID
-        : process.env.LIFERAY_SITE_ID_STAGING ?? process.env.LIFERAY_SITE_ID
-    ) ?? "20124",
+    baseUrl: parsed.origin,
+    siteId,
   };
 }
 
@@ -140,7 +160,4 @@ export async function listFolderDocuments(folderId: number | string, environment
   return [];
 }
 
-export const liferayConfig = {
-  production: liferayConfigFor("production"),
-  staging: liferayConfigFor("staging"),
-};
+// Environment configuration is resolved per request, so unused staging URLs are not required for production.
