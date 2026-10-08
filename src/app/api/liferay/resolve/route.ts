@@ -6,19 +6,20 @@ import { resolveAirlineAsset, resolveDestinationAsset } from "@/integrations/lif
 const requestSchema = z.object({
   folderName: z.string().trim().min(1),
   mode: z.enum(["destination", "airline"]),
+  environment: z.enum(["production", "staging"]).default("production"),
   values: z.array(z.string().trim().min(1)).min(1),
 });
 
 export async function POST(request: Request) {
   try {
     const body = requestSchema.parse(await request.json());
-    const folder = await findFolderByName(body.folderName);
+    const folder = await findFolderByName(body.folderName, body.environment);
 
     if (!folder) {
-      return NextResponse.json({ ok: false, code: "folder-not-found", message: `Pasta “${body.folderName}” não encontrada.` }, { status: 404 });
+      return NextResponse.json({ ok: false, code: "folder-not-found", message: `Pasta “${body.folderName}” não encontrada no ambiente ${body.environment}.` }, { status: 404 });
     }
 
-    const documents = await listFolderDocuments(folder.id);
+    const documents = await listFolderDocuments(folder.id, body.environment);
     const uniqueValues = Array.from(new Set(body.values));
     const resolutions = Object.fromEntries(
       uniqueValues.map((value) => [
