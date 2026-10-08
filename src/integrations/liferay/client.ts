@@ -90,7 +90,17 @@ async function getJson<T>(url: string): Promise<T> {
     throw new Error(`Liferay redirecionou a consulta HTTP ${response.status} (possível login/SSO).`);
   }
   if (!response.ok) {
-    throw new Error(`Liferay respondeu HTTP ${response.status} ao consultar a API Headless.`);
+    const contentType = response.headers.get("content-type") ?? "";
+    let detail = "";
+    if (contentType.includes("json")) {
+      try {
+        const body = await response.json() as { title?: string; detail?: string; message?: string; status?: string };
+        detail = [body.title, body.detail, body.message].filter(Boolean).join(" — ").slice(0, 240);
+      } catch {
+        // No body diagnostics; preserve HTTP status.
+      }
+    }
+    throw new Error(`Liferay respondeu HTTP ${response.status}${detail ? `: ${detail}` : ""}.`);
   }
   const type = response.headers.get("content-type") ?? "";
   if (type && !type.includes("json")) {
@@ -160,7 +170,7 @@ export async function findFolderByName(name: string, environment: LiferayEnviron
   return null;
 }
 
-async function readAllPages<T>(firstUrl: string): Promise<T[]> {
+async function readAllPages<T>(firstUrl: string, maxPages = 50): Promise<T[]> {
   const all: T[] = [];
   let page = 1;
   let lastPage = 1;
@@ -174,55 +184,102 @@ async function readAllPages<T>(firstUrl: string): Promise<T[]> {
     all.push(...data.items);
     lastPage = Math.max(1, data.lastPage ?? Math.ceil((data.totalCount ?? all.length) / (data.pageSize ?? 200)));
     page += 1;
-  } while (page <= lastPage && page <= 50);
+  } while (page <= lastPage && page <= maxPages);
 
   return all;
 }
 
-export async function listFolderDocuments(folderId: number | string, environment: LiferayEnvironment = "production"): Promise<DocumentListing> {
+/** Discover only documents proven to belong to the selected Liferay folder. */
+export async function listFolderDocuments(
+  folderId: number | string,
+  environment: LiferayEnvironment = "production",
+  searchTerms: string[] = [],
+): Promise<DocumentListing> {
   const { baseUrl, siteId } = liferayConfigFor(environment);
-  const attempts = [
-    {
-      label: "document-folders/{id}/documents",
-      url: `${baseUrl}/o/headless-delivery/v1.0/document-folders/${folderId}/documents`,
-    },
-    {
-      label: "sites/{id}/documents (documentFolderId)",
-      url: `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?filter=${encodeURIComponent(`documentFolderId eq ${folderId}`)}`,
-    },
-    {
-      label: "sites/{id}/documents (folderId)",
-      url: `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?filter=${encodeURIComponent(`folderId eq ${folderId}`)}`,
-    },
-  ];
   const diagnostics: DocumentDiscoveryDiagnostic[] = [];
+  const folderUrl = `${baseUrl}/o/headless-delivery/v1.0/document-folders/${folderId}/documents`;
 
-  for (const attempt of attempts) {
-    try {
-      const raw = await readAllPages<any>(attempt.url);
-      const documents = raw.map((item) => mapDocument(item, baseUrl)).filter((item): item is LiferayDocument => Boolean(item));
-      const missingFields = raw.length > documents.length;
+  // The folder-scoped endpoint is the preferred, authoritative way to list its media.
+  try {
+    const raw = await readAllPages<any>(folderUrl);
+    const documents = raw.map((item) => mapDocument(item, baseUrl)).filter((item): item is LiferayDocument => Boolean(item));
+    diagnostics.push({
+      endpoint: "document-folders/{id}/documents",
+      rawCount: raw.length,
+      mappedCount: documents.length,
+      detail: raw.length === 0
+        ? "A consulta direta da pasta retornou uma lista vazia."
+        : raw.length !== documents.length
+          ? `${raw.length - documents.length} item(ns) sem ID, título ou contentUrl.`
+          : "Documentos encontrados pelo endpoint da pasta.",
+    });
+    if (documents.length) return { documents, diagnostics };
+  } catch (error) {
+    diagnostics.push({
+      endpoint: "document-folders/{id}/documents",
+      rawCount: 0,
+      mappedCount: 0,
+      detail: error instanceof Error ? error.message : "Erro desconhecido.",
+    });
+  }
 
-      diagnostics.push({
-        endpoint: attempt.label,
-        rawCount: raw.length,
-        mappedCount: documents.length,
-        detail: missingFields
-          ? `${raw.length - documents.length} documento(s) sem ID, título ou contentUrl na resposta da API.`
-          : raw.length === 0 ? "A API respondeu com uma lista vazia." : "Documentos retornados e mapeados.",
-      });
-      if (documents.length) return { documents, diagnostics };
-    } catch (error) {
-      diagnostics.push({
-        endpoint: attempt.label,
-        rawCount: 0,
-        mappedCount: 0,
-        detail: error instanceof Error ? error.message : "Falha desconhecida.",
-      });
+  // Avoid filtering by documentFolderId/folderId via OData here: some DXP versions
+  // reject those expressions with HTTP 400. Instead search the site by title/airline,
+  // and locally verify documentFolderId before accepting any candidate.
+  const terms = Array.from(new Set(searchTerms.map((term) => term.trim()).filter(Boolean)));
+  if (terms.length === 0) {
+    diagnostics.push({
+      endpoint: "sites/{id}/documents?search=",
+      rawCount: 0,
+      mappedCount: 0,
+      detail: "Sem termos de busca; a pesquisa no site não foi executada.",
+    });
+    return { documents: [], diagnostics };
+  }
+
+  const matched = new Map<string, LiferayDocument>();
+  // Bound outbound concurrency to avoid flooding the Liferay search service.
+  for (let offset = 0; offset < terms.length; offset += 4) {
+    const batch = terms.slice(offset, offset + 4);
+    const batchResults = await Promise.all(batch.map(async (term) => {
+      const url = `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?search=${encodeURIComponent(term)}`;
+      try {
+        // Search results are paginated; up to 3 pages per term (600 records).
+        const raw = await readAllPages<any>(url, 3);
+        const inFolder = raw.filter((item) => String(item.documentFolderId ?? "") === String(folderId));
+        const documents = inFolder.map((item) => mapDocument(item, baseUrl))
+          .filter((item): item is LiferayDocument => Boolean(item));
+        return {
+          documents,
+          diagnostic: {
+            endpoint: `sites/{id}/documents?search=${encodeURIComponent(term)}`,
+            rawCount: raw.length,
+            mappedCount: documents.length,
+            detail: raw.length === 0
+              ? "Busca do site vazia para este termo."
+              : `${inFolder.length} item(ns) pertencem à pasta ${folderId}; ${documents.length} possuem ID, título e URL.`,
+          } satisfies DocumentDiscoveryDiagnostic,
+        };
+      } catch (error) {
+        return {
+          documents: [] as LiferayDocument[],
+          diagnostic: {
+            endpoint: `sites/{id}/documents?search=${encodeURIComponent(term)}`,
+            rawCount: 0,
+            mappedCount: 0,
+            detail: error instanceof Error ? error.message : "Erro desconhecido.",
+          } satisfies DocumentDiscoveryDiagnostic,
+        };
+      }
+    }));
+
+    for (const result of batchResults) {
+      diagnostics.push(result.diagnostic);
+      for (const doc of result.documents) matched.set(String(doc.id), doc);
     }
   }
 
-  return { documents: [], diagnostics };
+  return { documents: Array.from(matched.values()), diagnostics };
 }
 
 // Resolve configuration lazily. Public document URLs and Headless listing permissions are distinct.
