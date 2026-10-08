@@ -33,7 +33,7 @@ MIA → MIA_750x500_1 → URL pública retornada pelo Liferay
 
 A pasta de logos começa come` default_cias_v5` e também pode ser alterada.
 
-Clique em **Resolver assets**. A ferramenta informa quantos destinos/logos foram localizados em cada pasta.
+Clique em **Resolver assets**. Caso a API do Liferay esteja inacessível por autenticação ou pelo ambiente de consulta, o diagnóstico exibirá qual pasta falhou. Para imagens de destinos, selecione o carrossel, cole os links HTTPS reais do Documents and Media no campo **Associar imagens por URL**, um por linha, e clique **Associar URLs ao carrossel**. Os documentos são associados pelo prefixo IATA, sem inventar caminhos. O preflight continuará bloqueando imagens faltantes, logotipos faltantes e qualquer outra divergência.
 
 ## 4. Conferir agrupamentos
 
