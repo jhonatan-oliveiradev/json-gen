@@ -3,7 +3,7 @@
  * is unavailable to the local app (for example, when browser SSO is required).
  * Never guess asset suffixes or silently match a URL to a different carousel.
  */
-export function parseDestinationUrls(input: string, expectedIatas: string[]): {
+export function parseDestinationUrls(input: string, expectedIatas: string[], environment: "production" | "staging" = "production"): {
   urls: Record<string, string>;
   errors: string[];
 } {
@@ -28,6 +28,12 @@ export function parseDestinationUrls(input: string, expectedIatas: string[]): {
 
     if (parsed.protocol !== "https:" || (parsed.hostname !== "smiles.com.br" && !parsed.hostname.endsWith(".smiles.com.br"))) {
       errors.push("Use apenas URLs HTTPS do domínio Smiles: " + token);
+      continue;
+    }
+
+    // Staging URLs must never slip into an export intended for production.
+    if (environment === "production" && /(?:^|[-.])(?:stg|staging)(?:[-.]|$)/i.test(parsed.hostname)) {
+      errors.push("URL de staging não permitida em produção: " + token + ". Selecione Staging para testes.");
       continue;
     }
 
