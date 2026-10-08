@@ -6,7 +6,7 @@ import { resolveAirlineAsset, resolveDestinationAsset } from "@/integrations/lif
 const requestSchema = z.object({
   folderName: z.string().trim().min(1),
   mode: z.enum(["destination", "airline"]),
-  environment: z.enum(["production", "staging"]).default("production"),
+  environment: z.enum(["production", "staging-green", "staging-blue"]).default("production"),
   values: z.array(z.string().trim().min(1)).min(1),
 });
 
