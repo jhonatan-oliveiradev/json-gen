@@ -4,10 +4,10 @@ import { findFolderByName, liferayConfigFor, listFolderDocuments } from "@/integ
 import { resolveAirlineAsset, resolveDestinationAsset } from "@/integrations/liferay/resolve-assets";
 
 const requestSchema = z.object({
-  folderName: z.string().trim().min(1),
+  folderName: z.string().trim().min(1).max(200),
   mode: z.enum(["destination", "airline"]),
   environment: z.enum(["production", "staging-green", "staging-blue"]).default("production"),
-  values: z.array(z.string().trim().min(1)).min(1),
+  values: z.array(z.string().trim().min(1).max(80)).min(1).max(50),
 });
 
 export async function POST(request: Request) {
@@ -20,9 +20,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, code: "folder-not-found", message: `Pasta “${body.folderName}” não encontrada no ambiente ${body.environment}.` }, { status: 404 });
     }
 
-    const listing = await listFolderDocuments(folder.id, body.environment);
-    const documents = listing.documents;
     const uniqueValues = Array.from(new Set(body.values));
+    const listing = await listFolderDocuments(folder.id, body.environment, uniqueValues);
+    const documents = listing.documents;
     const resolutions = Object.fromEntries(
       uniqueValues.map((value) => [
         value,
