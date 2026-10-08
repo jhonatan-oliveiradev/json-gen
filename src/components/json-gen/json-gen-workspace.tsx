@@ -289,8 +289,10 @@ export function JsonGenWorkspace() {
                   <option value="staging-blue">Staging Blue</option>
                 </select>
                 <span className="text-xs leading-5 text-muted-foreground">
-                  O JSON usa a URL real retornada pelo Liferay. Publicar uma imagem no staging não garante que ela exista em produção.
-                  Para gerar URLs de produção, selecione Produção; selecione Green ou Blue para homologar.
+                  O JSON usa a URL real retornada pelo Liferay, sem alterar o domínio.
+                  {environment === "production"
+                    ? " Você está consultando Produção. Imagens publicadas apenas no Staging Green ou Blue não serão encontradas aqui."
+                    : " Ambiente de homologação selecionado: os documentos precisam estar publicados neste staging."}
                 </span>
               </label>
             </div>
