@@ -36,20 +36,23 @@ O arquivo segue o padrão `AER####_OFFERS01.json`, `AER####_OFFERS02.json` etc.
 
 ## Liferay
 
-Por padrão, o backend local consulta:
+A interface permite escolher **Produção**, **Staging Green** ou **Staging Blue**. Cada escolha consulta somente o respectivo host; o JSON conserva as URLs retornadas, sem substituir o domínio.
 
-- Base de produção: `https://www.smiles.com.br` (seleção padrão)\n- Base de staging: `https://portal-green-stg-svc.smiles.com.br` (seleção explícita)
-- Site ID: `20124`
+Configure as seguintes variáveis na Vercel (Production e, se for testar deployments de preview, também Preview):
 
-Você pode substituir sem alterar código:
+| Variável | Uso |
+| --- | --- |
+| `LIFERAY_BASE_URL` | URL do Liferay de produção (padrão `https://www.smiles.com.br`) |
+| `LIFERAY_SITE_ID_PRODUCTION` | ID do site Liferay em produção |
+| `LIFERAY_STAGING_GREEN_BASE_URL` | URL de homologação Green |
+| `LIFERAY_STAGING_BLUE_BASE_URL` | URL de homologação Blue |
+| `LIFERAY_SITE_ID_STAGING` | ID do site de homologação compartilhado, caso Green e Blue usem o mesmo |
 
-```bash
-LIFERAY_BASE_URL=https://www.smiles.com.br
-LIFERAY_SITE_ID=20124
-```
+O antigo nome `LIFERAY_STAGING_BASE_URL` não é utilizado. A ausência da variável Green ou Blue escolhida gera um erro explícito, em vez de consultar outro ambiente silenciosamente. Os IDs `20124` do exemplo não foram verificados; devem ser confirmados com a configuração real do Liferay.
 
-O resolver procura a pasta pelo nome e depois busca os documentos da pasta.
-Na interface, selecione **Produção** para documentos publicados em `www.smiles.com.br`; use **Staging** apenas para testar URLs daquele ambiente. A ferramenta não reescreve o host retornado pela API nem presume que imagens publicadas em staging estão disponíveis em produção. Se o site ID for diferente entre os ambientes, configure-o para cada um no `.env.local` e reinicie o servidor. Um `.env.local` antigo prevalece sobre os valores padrão. O app server-side não reutiliza a sessão do Liferay aberta no navegador: quando a API exige SSO, use as URLs completas já publicadas no Documents and Media, ou configure acesso de leitura Headless autorizado. Se o endpoint direto vier vazio, há um fallback pelo site filtrando `documentFolderId`.
+Para uso local, configure o mesmo no `.env.local` e reinicie o servidor. Variáveis configuradas na Vercel somente para **Production** não ficam disponíveis nos deploys de **Preview** nem no Next.js local.
+
+O resolvedor encontra pastas por nome e consulta o endpoint de documentos da pasta. Se a pasta for encontrada mas nenhum documento estiver acessível, confira **permissões do Headless Delivery e endpoint de listagem**, não apenas o host ou a URL pública de mídia.
 
 ## Comandos
 
