@@ -16,6 +16,8 @@ type Resolution =
   | { status: "missing"; candidates: string[] }
   | { status: "ambiguous"; candidates: Array<{ id: number | string; title: string; url: string }> };
 
+type LiferayEnvironment = "production" | "staging";
+
 type ResolveResponse =
   | { ok: true; folder: { id: number | string; name: string }; documentCount: number; resolutions: Record<string, Resolution> }
   | { ok: false; code: string; message: string };
@@ -33,11 +35,11 @@ function exportFileName(campaign: ParsedCampaign, carousel: string) {
   return `${campaign.campaignCode ?? "CAMPANHA"}_OFFERS${String(number).padStart(2, "0")}.json`;
 }
 
-async function resolveFolder(folderName: string, mode: "destination" | "airline", values: string[]): Promise<ResolveResponse> {
+async function resolveFolder(folderName: string, mode: "destination" | "airline", values: string[], environment: LiferayEnvironment): Promise<ResolveResponse> {
   const response = await fetch("/api/liferay/resolve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ folderName, mode, values }),
+    body: JSON.stringify({ folderName, mode, values, environment }),
   });
   return response.json();
 }
@@ -59,6 +61,7 @@ export function JsonGenWorkspace() {
   const [activeCarousel, setActiveCarousel] = useState("");
   const [folders, setFolders] = useState<Record<string, string>>({});
   const [airlineFolder, setAirlineFolder] = useState("default_cias_v5");
+  const [environment, setEnvironment] = useState<LiferayEnvironment>("production");
   const [assets, setAssets] = useState<AssetCatalog>(EMPTY_ASSETS);
   const [resolving, setResolving] = useState(false);
   const [resolvedOnce, setResolvedOnce] = useState(false);
@@ -109,7 +112,7 @@ export function JsonGenWorkspace() {
     try {
       for (const carousel of campaign.carousels) {
         const iatas = Array.from(new Set(campaign.offers.filter((offer) => offer.carousel === carousel).map((offer) => offer.destination.iata)));
-        const result = await resolveFolder(folders[carousel], "destination", iatas);
+        const result = await resolveFolder(folders[carousel], "destination", iatas, environment);
         if (!result.ok) {
           diagnostics.push(`${carousel}: ${result.message} (${result.code}).`);
           for (const iata of iatas) next.destinationErrors![`${normalizeKey(carousel)}:${iata}`] = "missing";
@@ -126,7 +129,7 @@ export function JsonGenWorkspace() {
         }
       }
 
-      const airlineResult = await resolveFolder(airlineFolder, "airline", campaign.airlines);
+      const airlineResult = await resolveFolder(airlineFolder, "airline", campaign.airlines, environment);
       if (!airlineResult.ok) {
         diagnostics.push(`Logos: ${airlineResult.message} (${airlineResult.code}).`);
         for (const airline of campaign.airlines) next.airlineErrors![normalizeKey(airline)] = "missing";
@@ -156,7 +159,7 @@ export function JsonGenWorkspace() {
 
   function applyManualUrls() {
     const expectedIatas = Array.from(new Set(activeOffers.map((offer) => offer.destination.iata)));
-    const { urls, errors } = parseDestinationUrls(manualInputs[activeCarousel] ?? "", expectedIatas);
+    const { urls, errors } = parseDestinationUrls(manualInputs[activeCarousel] ?? "", expectedIatas, environment);
     const assignments = Object.fromEntries(
       Object.entries(urls).map(([iata, url]) => [`${normalizeKey(activeCarousel)}:${iata}`, url]),
     );
@@ -249,6 +252,33 @@ export function JsonGenWorkspace() {
                   <span><b>{summary.airlineCount}</b> cias</span>
                 </div>
               ) : null}
+            </div>
+
+            <div className="border-b border-border py-5">
+              <label className="grid max-w-md gap-2">
+                <span className="text-sm font-semibold">Ambiente dos documentos Liferay</span>
+                <select
+                  aria-label="Ambiente do Liferay"
+                  className="h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  value={environment}
+                  onChange={(event) => {
+                    setEnvironment(event.target.value as LiferayEnvironment);
+                    setAssets(EMPTY_ASSETS);
+                    setManualOverrides({});
+                    setManualInputs({});
+                    setResolutionMessages([]);
+                    setManualMessage("");
+                    setResolvedOnce(false);
+                  }}
+                >
+                  <option value="production">Produção (www.smiles.com.br)</option>
+                  <option value="staging">Staging (portal-green-stg-svc)</option>
+                </select>
+                <span className="text-xs leading-5 text-muted-foreground">
+                  O JSON usa a URL real retornada pelo Liferay. Publicar uma imagem no staging não garante que ela exista em produção.
+                  Para gerar URLs de produção, selecione Produção.
+                </span>
+              </label>
             </div>
 
             <div className="grid gap-6 border-b border-border py-6 lg:grid-cols-[1.2fr_.8fr]">
