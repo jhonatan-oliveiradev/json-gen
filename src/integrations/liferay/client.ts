@@ -242,7 +242,7 @@ export async function listFolderDocuments(
   for (let offset = 0; offset < terms.length; offset += 4) {
     const batch = terms.slice(offset, offset + 4);
     const batchResults = await Promise.all(batch.map(async (term) => {
-      const url = `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?search=${encodeURIComponent(term)}`;
+      const url = `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?flatten=true&recursive=true&search=${encodeURIComponent(term)}`;
       try {
         // Search results are paginated; up to 3 pages per term (600 records).
         const raw = await readAllPages<any>(url, 3);
