@@ -4,10 +4,10 @@ import { findFolderByName, liferayConfigFor, listFolderDocuments } from "@/integ
 import { resolveAirlineAsset, resolveDestinationAsset } from "@/integrations/liferay/resolve-assets";
 
 const requestSchema = z.object({
-  folderName: z.string().trim().min(1),
+  folderName: z.string().trim().min(1).max(200),
   mode: z.enum(["destination", "airline"]),
   environment: z.enum(["production", "staging-green", "staging-blue"]).default("production"),
-  values: z.array(z.string().trim().min(1)).min(1),
+  values: z.array(z.string().trim().min(1).max(80)).min(1).max(50),
 });
 
 export async function POST(request: Request) {
