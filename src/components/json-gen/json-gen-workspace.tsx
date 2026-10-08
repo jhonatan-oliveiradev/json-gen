@@ -9,6 +9,7 @@ import { mapOfferToExport } from "@/domain/export/map-export";
 import { exportOfferSchema } from "@/domain/export/export-schema";
 import { airlineAssetKey, destinationAssetKey, validateCampaign } from "@/domain/validation/validate-campaign";
 import type { AssetCatalog } from "@/domain/validation/types";
+import { parseDestinationUrls } from "@/integrations/liferay/manual-assets";
 
 type Resolution =
   | { status: "resolved"; url: string; documentId: number | string; title: string }
@@ -61,6 +62,11 @@ export function JsonGenWorkspace() {
   const [assets, setAssets] = useState<AssetCatalog>(EMPTY_ASSETS);
   const [resolving, setResolving] = useState(false);
   const [resolvedOnce, setResolvedOnce] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [manualInputs, setManualInputs] = useState<Record<string, string>>({});
+  const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({});
+  const [manualMessage, setManualMessage] = useState("");
+  const [resolutionMessages, setResolutionMessages] = useState<string[]>([]);
 
   const groups = useMemo(() => campaign ? groupOffers(campaign.offers) : [], [campaign]);
   const summary = useMemo(() => campaign ? summarizeCampaign(campaign.offers, groups) : null, [campaign, groups]);
@@ -74,6 +80,7 @@ export function JsonGenWorkspace() {
   async function handleFile(file: File) {
     setError(null);
     try {
+      if (!/\.(xlsx|xls)$/i.test(file.name)) throw new Error("Selecione um arquivo XLSX ou XLS.");
       const parsed = parseCampaignWorkbook(await file.arrayBuffer(), file.name);
       if (!parsed.offers.length) throw new Error("Nenhuma oferta válida foi encontrada.");
       setCampaign(parsed);
@@ -81,6 +88,10 @@ export function JsonGenWorkspace() {
       setActiveCarousel(parsed.carousels[0] ?? "");
       setFolders(Object.fromEntries(parsed.carousels.map((carousel) => [carousel, suggestFolder(parsed.campaignCode, carousel)])));
       setAssets(EMPTY_ASSETS);
+      setManualInputs({});
+      setManualOverrides({});
+      setManualMessage("");
+      setResolutionMessages([]);
       setResolvedOnce(false);
     } catch (e) {
       setCampaign(null);
@@ -93,14 +104,19 @@ export function JsonGenWorkspace() {
     setResolving(true);
     setError(null);
     const next: AssetCatalog = { destinations: {}, airlines: {}, destinationErrors: {}, airlineErrors: {} };
+    const diagnostics: string[] = [];
 
     try {
       for (const carousel of campaign.carousels) {
         const iatas = Array.from(new Set(campaign.offers.filter((offer) => offer.carousel === carousel).map((offer) => offer.destination.iata)));
         const result = await resolveFolder(folders[carousel], "destination", iatas);
         if (!result.ok) {
+          diagnostics.push(`${carousel}: ${result.message} (${result.code}).`);
           for (const iata of iatas) next.destinationErrors![`${normalizeKey(carousel)}:${iata}`] = "missing";
           continue;
+        }
+        if (result.documentCount === 0) {
+          diagnostics.push(`${carousel}: pasta encontrada, mas nenhum documento acessível via API.`);
         }
         for (const iata of iatas) {
           const resolution = result.resolutions[iata];
@@ -112,6 +128,7 @@ export function JsonGenWorkspace() {
 
       const airlineResult = await resolveFolder(airlineFolder, "airline", campaign.airlines);
       if (!airlineResult.ok) {
+        diagnostics.push(`Logos: ${airlineResult.message} (${airlineResult.code}).`);
         for (const airline of campaign.airlines) next.airlineErrors![normalizeKey(airline)] = "missing";
       } else {
         for (const airline of campaign.airlines) {
@@ -122,6 +139,12 @@ export function JsonGenWorkspace() {
         }
       }
 
+      // Pasted document URLs take precedence over inaccessible Headless API results.
+      for (const [key, url] of Object.entries(manualOverrides)) {
+        next.destinations[key] = url;
+        delete next.destinationErrors?.[key];
+      }
+      setResolutionMessages(diagnostics);
       setAssets(next);
       setResolvedOnce(true);
     } catch (e) {
@@ -129,6 +152,33 @@ export function JsonGenWorkspace() {
     } finally {
       setResolving(false);
     }
+  }
+
+  function applyManualUrls() {
+    const expectedIatas = Array.from(new Set(activeOffers.map((offer) => offer.destination.iata)));
+    const { urls, errors } = parseDestinationUrls(manualInputs[activeCarousel] ?? "", expectedIatas);
+    const assignments = Object.fromEntries(
+      Object.entries(urls).map(([iata, url]) => [`${normalizeKey(activeCarousel)}:${iata}`, url]),
+    );
+    const count = Object.keys(assignments).length;
+
+    if (count > 0) {
+      setManualOverrides((current) => ({ ...current, ...assignments }));
+      setAssets((current) => {
+        const destinationErrors = { ...(current.destinationErrors ?? {}) };
+        for (const key of Object.keys(assignments)) delete destinationErrors[key];
+        return {
+          ...current,
+          destinations: { ...current.destinations, ...assignments },
+          destinationErrors,
+        };
+      });
+      setResolvedOnce(true);
+    }
+    setManualMessage([
+      count > 0 ? `${count} imagem(ns) associada(s) a este carrossel.` : "Nenhuma imagem associada.",
+      ...errors,
+    ].join(" "));
   }
 
   function exportJson() {
@@ -155,13 +205,25 @@ export function JsonGenWorkspace() {
 
         {!campaign ? (
           <section className="workspace-shell p-6">
-            <label className="flex min-h-64 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-background p-8 text-center">
-              <strong className="text-lg">Solte sua planilha aqui</strong>
+            <label
+              className={`flex min-h-64 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-8 text-center transition-colors ${dragging ? "border-primary bg-primary/10" : "border-border bg-background"}`}
+              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDragging(true); }}
+              onDragLeave={(event) => { event.preventDefault(); if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragging(false);
+                const file = Array.from(event.dataTransfer.files).find((item) => /\.(xlsx|xls)$/i.test(item.name));
+                if (file) void handleFile(file);
+                else setError("Solte um arquivo XLSX ou XLS válido.");
+              }}
+            >
+              <strong className="text-lg">{dragging ? "Solte para importar a planilha" : "Solte sua planilha aqui"}</strong>
               <span className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Selecione o XLSX da campanha. O arquivo é processado localmente no navegador.</span>
               <span className="mt-5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Selecionar XLSX</span>
               <input className="sr-only" type="file" accept=".xlsx,.xls" onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) void handleFile(file);
+                e.currentTarget.value = "";
               }} />
             </label>
             {error ? <p className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
@@ -211,6 +273,12 @@ export function JsonGenWorkspace() {
                 <button className="mt-4 h-10 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-50" disabled={resolving} onClick={() => void resolveAssets()}>
                   {resolving ? "Consultando Liferay…" : "Resolver assets"}
                 </button>
+                {resolutionMessages.length > 0 ? (
+                  <div role="status" className="mt-3 grid gap-1 rounded-xl border border-warning/30 bg-warning/5 p-3 text-xs leading-5 text-muted-foreground">
+                    <strong className="text-foreground">Diagnóstico da consulta</strong>
+                    {resolutionMessages.map((message, index) => <p key={index}>{message}</p>)}
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -223,6 +291,28 @@ export function JsonGenWorkspace() {
                 ))}
               </div>
               <p className="mt-3 text-sm text-muted-foreground">{activeCarousel}</p>
+            </div>
+
+            <div className="border-b border-border py-5">
+              <h3 className="text-sm font-semibold">Associar imagens por URL</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Se a API do Liferay não encontrar as imagens, cole aqui os links diretos dos documentos do carrossel selecionado, um por linha.
+                O IATA será identificado pelo início do nome do arquivo (ex.: scl_750x500_1). Nenhuma URL é inventada.
+              </p>
+              <textarea
+                aria-label="URLs das imagens do carrossel"
+                className="mt-3 min-h-24 w-full resize-y rounded-xl border border-input bg-background p-3 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
+                placeholder="https://portal-green-stg-svc.smiles.com.br/documents/d/guest/scl_750x500_1-68"
+                value={manualInputs[activeCarousel] ?? ""}
+                onChange={(event) => { setManualInputs((current) => ({ ...current, [activeCarousel]: event.target.value })); setManualMessage(""); }}
+              />
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button className="h-9 rounded-xl border border-primary/30 bg-primary/10 px-4 text-xs font-semibold text-primary" onClick={applyManualUrls}>
+                  Associar URLs ao carrossel
+                </button>
+                <span className="text-xs text-muted-foreground">{Array.from(new Set(activeOffers.map((offer) => offer.destination.iata))).filter((iata) => assets.destinations[`${normalizeKey(activeCarousel)}:${iata}`]).length} de {new Set(activeOffers.map((offer) => offer.destination.iata)).size} destinos com imagem</span>
+              </div>
+              {manualMessage ? <p role="status" className="mt-2 text-xs leading-5 text-muted-foreground">{manualMessage}</p> : null}
             </div>
 
             <div className="grid gap-6 py-6 lg:grid-cols-2">
