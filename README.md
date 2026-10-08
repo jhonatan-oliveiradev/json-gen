@@ -38,7 +38,7 @@ O arquivo segue o padrão `AER####_OFFERS01.json`, `AER####_OFFERS02.json` etc.
 
 Por padrão, o backend local consulta:
 
-- Base: `https://portal-green-stg-svc.smiles.com.br`
+- Base de produção: `https://www.smiles.com.br` (seleção padrão)\n- Base de staging: `https://portal-green-stg-svc.smiles.com.br` (seleção explícita)
 - Site ID: `20124`
 
 Você pode substituir sem alterar código:
@@ -49,7 +49,7 @@ LIFERAY_SITE_ID=20124
 ```
 
 O resolver procura a pasta pelo nome e depois busca os documentos da pasta.
-Confirme que `LIFERAY_BASE_URL` aponta para o **mesmo ambiente** das imagens (staging neste caso). Se houver um `.env.local` antigo com a base de produção, ele prevalece sobre o valor padrão e deve ser atualizado. O app server-side não reutiliza a sessão do Liferay aberta no navegador: quando a API exige SSO, use as URLs completas já publicadas no Documents and Media, ou configure acesso de leitura Headless autorizado. Se o endpoint direto vier vazio, há um fallback pelo site filtrando `documentFolderId`.
+Na interface, selecione **Produção** para documentos publicados em `www.smiles.com.br`; use **Staging** apenas para testar URLs daquele ambiente. A ferramenta não reescreve o host retornado pela API nem presume que imagens publicadas em staging estão disponíveis em produção. Se o site ID for diferente entre os ambientes, configure-o para cada um no `.env.local` e reinicie o servidor. Um `.env.local` antigo prevalece sobre os valores padrão. O app server-side não reutiliza a sessão do Liferay aberta no navegador: quando a API exige SSO, use as URLs completas já publicadas no Documents and Media, ou configure acesso de leitura Headless autorizado. Se o endpoint direto vier vazio, há um fallback pelo site filtrando `documentFolderId`.
 
 ## Comandos
 
