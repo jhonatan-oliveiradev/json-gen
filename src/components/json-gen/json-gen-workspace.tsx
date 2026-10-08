@@ -19,7 +19,7 @@ type Resolution =
 type LiferayEnvironment = "production" | "staging-green" | "staging-blue";
 
 type ResolveResponse =
-  | { ok: true; folder: { id: number | string; name: string }; documentCount: number; resolutions: Record<string, Resolution> }
+  | { ok: true; folder: { id: number | string; name: string }; source: { hostname: string; siteId: string }; documentCount: number; diagnostics: Array<{ endpoint: string; rawCount: number; mappedCount: number; detail: string }>; resolutions: Record<string, Resolution> }
   | { ok: false; code: string; message: string };
 
 const EMPTY_ASSETS: AssetCatalog = { destinations: {}, airlines: {}, destinationErrors: {}, airlineErrors: {} };
@@ -118,8 +118,14 @@ export function JsonGenWorkspace() {
           for (const iata of iatas) next.destinationErrors![`${normalizeKey(carousel)}:${iata}`] = "missing";
           continue;
         }
+        if (!diagnostics.some((message) => message.startsWith("Fonte da consulta:"))) {
+          diagnostics.unshift(`Fonte da consulta: ${result.source.hostname} (site ID ${result.source.siteId}).`);
+        }
         if (result.documentCount === 0) {
-          diagnostics.push(`${carousel}: pasta encontrada, mas nenhum documento acessível via API.`);
+          diagnostics.push(`${carousel}: pasta "${result.folder.name}" (ID ${result.folder.id}) encontrada, mas nenhum documento utilizável foi retornado.`);
+          for (const detail of result.diagnostics ?? []) {
+            diagnostics.push(`  ${detail.endpoint}: ${detail.detail} (recebidos: ${detail.rawCount}; utilizáveis: ${detail.mappedCount}).`);
+          }
         }
         for (const iata of iatas) {
           const resolution = result.resolutions[iata];
@@ -134,6 +140,12 @@ export function JsonGenWorkspace() {
         diagnostics.push(`Logos: ${airlineResult.message} (${airlineResult.code}).`);
         for (const airline of campaign.airlines) next.airlineErrors![normalizeKey(airline)] = "missing";
       } else {
+        if (airlineResult.documentCount === 0) {
+          diagnostics.push(`Logos: pasta "${airlineResult.folder.name}" (ID ${airlineResult.folder.id}) encontrada, mas sem documentos utilizáveis.`);
+          for (const detail of airlineResult.diagnostics ?? []) {
+            diagnostics.push(`  ${detail.endpoint}: ${detail.detail} (recebidos: ${detail.rawCount}; utilizáveis: ${detail.mappedCount}).`);
+          }
+        }
         for (const airline of campaign.airlines) {
           const resolution = airlineResult.resolutions[airline];
           const key = normalizeKey(airline);
@@ -311,7 +323,7 @@ export function JsonGenWorkspace() {
                   {resolving ? "Consultando Liferay…" : "Resolver assets"}
                 </button>
                 {resolutionMessages.length > 0 ? (
-                  <div role="status" className="mt-3 grid gap-1 rounded-xl border border-warning/30 bg-warning/5 p-3 text-xs leading-5 text-muted-foreground">
+                  <div role="status" className="mt-3 grid max-h-72 gap-1 overflow-y-auto rounded-xl border border-warning/30 bg-warning/5 p-3 text-xs leading-5 text-muted-foreground">
                     <strong className="text-foreground">Diagnóstico da consulta</strong>
                     {resolutionMessages.map((message, index) => <p key={index}>{message}</p>)}
                   </div>

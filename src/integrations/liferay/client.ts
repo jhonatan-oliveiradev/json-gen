@@ -26,11 +26,26 @@ export function liferayConfigFor(environment: LiferayEnvironment) {
   }
 
   if (!baseUrl?.trim()) {
-    throw new Error(`Configure ${variable} na Vercel e faça um novo deploy para usar ${environment}.`);
+    throw new Error(`Configure ${variable} na Vercel (exemplo: https://www.smiles.com.br) e faça um novo deploy.`);
   }
-  const parsed = new URL(baseUrl);
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/") {
-    throw new Error(`A variável ${variable} deve conter somente a origem HTTPS do Liferay.`);
+
+  // Vercel values sometimes arrive copied with quotes or without a scheme.
+  // Normalize these harmless variations, but never change the intended host.
+  const trimmed = baseUrl.trim().replace(/^["']|["']$/g, "").trim();
+  const candidate = /^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(`${variable} contém um endereço inválido. Configure apenas o domínio HTTPS, sem aspas nem caminho (ex.: https://www.smiles.com.br).`);
+  }
+
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/" ||
+      !(parsed.hostname === "smiles.com.br" || parsed.hostname.endsWith(".smiles.com.br"))) {
+    throw new Error(`${variable} deve conter somente uma origem HTTPS de smiles.com.br, sem caminho, parâmetros nem credenciais.`);
+  }
+  if (!/^\d+$/.test(String(siteId))) {
+    throw new Error(`O site ID configurado para ${environment} é inválido: informe somente o ID numérico do site Liferay.`);
   }
 
   return {
@@ -44,6 +59,18 @@ const headers = {
   "Accept-Language": "pt-BR",
 };
 
+export type DocumentDiscoveryDiagnostic = {
+  endpoint: string;
+  rawCount: number;
+  mappedCount: number;
+  detail: string;
+};
+
+export type DocumentListing = {
+  documents: LiferayDocument[];
+  diagnostics: DocumentDiscoveryDiagnostic[];
+};
+
 type Collection<T> = {
   items?: T[];
   page?: number;
@@ -53,11 +80,27 @@ type Collection<T> = {
 };
 
 async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { headers, cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`Liferay respondeu ${response.status} ao consultar ${new URL(url).pathname}.`);
+  let response: Response;
+  try {
+    response = await fetch(url, { headers, cache: "no-store", redirect: "manual" });
+  } catch (error) {
+    throw new Error(`Falha de rede ao consultar o Liferay: ${error instanceof Error ? error.message : "conexão indisponível"}.`);
   }
-  return response.json() as Promise<T>;
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`Liferay redirecionou a consulta HTTP ${response.status} (possível login/SSO).`);
+  }
+  if (!response.ok) {
+    throw new Error(`Liferay respondeu HTTP ${response.status} ao consultar a API Headless.`);
+  }
+  const type = response.headers.get("content-type") ?? "";
+  if (type && !type.includes("json")) {
+    throw new Error(`Liferay retornou ${type.split(";")[0]} em vez de JSON (possível login/SSO ou endpoint incorreto).`);
+  }
+  try {
+    return await response.json() as T;
+  } catch {
+    throw new Error("Liferay respondeu com conteúdo que não é JSON válido.");
+  }
 }
 
 function absoluteContentUrl(contentUrl: string, baseUrl: string): string {
@@ -127,7 +170,8 @@ async function readAllPages<T>(firstUrl: string): Promise<T[]> {
     url.searchParams.set("page", String(page));
     url.searchParams.set("pageSize", "200");
     const data = await getJson<Collection<T>>(url.toString());
-    all.push(...(data.items ?? []));
+    if (!Array.isArray(data?.items)) throw new Error("Liferay retornou uma coleção sem o campo items (array).");
+    all.push(...data.items);
     lastPage = Math.max(1, data.lastPage ?? Math.ceil((data.totalCount ?? all.length) / (data.pageSize ?? 200)));
     page += 1;
   } while (page <= lastPage && page <= 50);
@@ -135,29 +179,50 @@ async function readAllPages<T>(firstUrl: string): Promise<T[]> {
   return all;
 }
 
-export async function listFolderDocuments(folderId: number | string, environment: LiferayEnvironment = "production"): Promise<LiferayDocument[]> {
+export async function listFolderDocuments(folderId: number | string, environment: LiferayEnvironment = "production"): Promise<DocumentListing> {
   const { baseUrl, siteId } = liferayConfigFor(environment);
   const attempts = [
-    `${baseUrl}/o/headless-delivery/v1.0/document-folders/${folderId}/documents`,
-    `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?filter=${encodeURIComponent(`documentFolderId eq ${folderId}`)}`,
-    `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?filter=${encodeURIComponent(`folderId eq ${folderId}`)}`,
+    {
+      label: "document-folders/{id}/documents",
+      url: `${baseUrl}/o/headless-delivery/v1.0/document-folders/${folderId}/documents`,
+    },
+    {
+      label: "sites/{id}/documents (documentFolderId)",
+      url: `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?filter=${encodeURIComponent(`documentFolderId eq ${folderId}`)}`,
+    },
+    {
+      label: "sites/{id}/documents (folderId)",
+      url: `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?filter=${encodeURIComponent(`folderId eq ${folderId}`)}`,
+    },
   ];
+  const diagnostics: DocumentDiscoveryDiagnostic[] = [];
 
-  let lastError: unknown = null;
-  let completedRequest = false;
-  for (const url of attempts) {
+  for (const attempt of attempts) {
     try {
-      const raw = await readAllPages<any>(url);
-      completedRequest = true;
+      const raw = await readAllPages<any>(attempt.url);
       const documents = raw.map((item) => mapDocument(item, baseUrl)).filter((item): item is LiferayDocument => Boolean(item));
-      if (documents.length) return documents;
+      const missingFields = raw.length > documents.length;
+
+      diagnostics.push({
+        endpoint: attempt.label,
+        rawCount: raw.length,
+        mappedCount: documents.length,
+        detail: missingFields
+          ? `${raw.length - documents.length} documento(s) sem ID, título ou contentUrl na resposta da API.`
+          : raw.length === 0 ? "A API respondeu com uma lista vazia." : "Documentos retornados e mapeados.",
+      });
+      if (documents.length) return { documents, diagnostics };
     } catch (error) {
-      lastError = error;
+      diagnostics.push({
+        endpoint: attempt.label,
+        rawCount: 0,
+        mappedCount: 0,
+        detail: error instanceof Error ? error.message : "Falha desconhecida.",
+      });
     }
   }
 
-  if (!completedRequest && lastError instanceof Error) throw lastError;
-  return [];
+  return { documents: [], diagnostics };
 }
 
-// Environment configuration is resolved per request, so unused staging URLs are not required for production.
+// Resolve configuration lazily. Public document URLs and Headless listing permissions are distinct.

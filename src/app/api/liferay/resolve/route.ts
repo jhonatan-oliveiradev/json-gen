@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { findFolderByName, listFolderDocuments } from "@/integrations/liferay/client";
+import { findFolderByName, liferayConfigFor, listFolderDocuments } from "@/integrations/liferay/client";
 import { resolveAirlineAsset, resolveDestinationAsset } from "@/integrations/liferay/resolve-assets";
 
 const requestSchema = z.object({
@@ -13,13 +13,15 @@ const requestSchema = z.object({
 export async function POST(request: Request) {
   try {
     const body = requestSchema.parse(await request.json());
+    const config = liferayConfigFor(body.environment);
     const folder = await findFolderByName(body.folderName, body.environment);
 
     if (!folder) {
       return NextResponse.json({ ok: false, code: "folder-not-found", message: `Pasta “${body.folderName}” não encontrada no ambiente ${body.environment}.` }, { status: 404 });
     }
 
-    const documents = await listFolderDocuments(folder.id, body.environment);
+    const listing = await listFolderDocuments(folder.id, body.environment);
+    const documents = listing.documents;
     const uniqueValues = Array.from(new Set(body.values));
     const resolutions = Object.fromEntries(
       uniqueValues.map((value) => [
@@ -30,7 +32,14 @@ export async function POST(request: Request) {
       ]),
     );
 
-    return NextResponse.json({ ok: true, folder, documentCount: documents.length, resolutions });
+    return NextResponse.json({
+      ok: true,
+      folder,
+      source: { hostname: new URL(config.baseUrl).hostname, siteId: config.siteId },
+      documentCount: documents.length,
+      diagnostics: listing.diagnostics,
+      resolutions,
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ ok: false, code: "invalid-request", message: "Parâmetros inválidos para resolver assets." }, { status: 400 });

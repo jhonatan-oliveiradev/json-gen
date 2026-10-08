@@ -54,6 +54,23 @@ Para uso local, configure o mesmo no `.env.local` e reinicie o servidor. Variáv
 
 O resolvedor encontra pastas por nome e consulta o endpoint de documentos da pasta. Se a pasta for encontrada mas nenhum documento estiver acessível, confira **permissões do Headless Delivery e endpoint de listagem**, não apenas o host ou a URL pública de mídia.
 
+
+### Diagnóstico de assets (AER1525)
+
+O JSON Gen primeiro identifica a pasta por nome e depois chama os documentos pela API Headless Delivery, usando o ID da pasta. **Abrir um arquivo por uma URL pública `/documents/d/guest/...` não equivale a ter permissão de listar a pasta pelo endpoint Headless.**
+
+A seção "Diagnóstico da consulta" informa agora o resultado real de cada endpoint testado:
+
+- **Variável de ambiente inválida** — verifique `LIFERAY_BASE_URL` no deployment usado. Configure apenas `https://www.smiles.com.br` (sem adicionais). Valores comuns copiados com aspas, espaços externos ou sem `https://` são normalizados.
+- **HTTP 401/403** — política/autenticação impede a listagem. Um documento pode continuar publicamente acessível por URL individual.
+- **HTTP 302 ou resposta HTML** — provável redirecionamento à tela de login/SSO.
+- **Lista vazia** — pasta encontrada, mas o endpoint não retornou itens; confirme site ID, ID da pasta, ambiente e permissões.
+- **Itens sem `contentUrl`** — a API retornou metadados, mas não a URL necessária. O JSON Gen não inventa URLs ou sufixos.
+
+Para URLs como `https://portal-green-stg-svc.smiles.com.br/documents/d/guest/scl_750x500_1-68`, selecione **Staging Green**. Para produção, consulte o ambiente **Produção** com URLs de produção efetivamente publicadas.
+
+Se todos os endpoints de listagem exigirem autenticação, será necessário autorizar leitura por uma integração técnica apropriada no Liferay (OAuth2/serviço), ou fornecer as URLs públicas já existentes por carrossel; não é seguro tentar burlar a autenticação com cookies do navegador.
+
 ## Comandos
 
 ```bash
