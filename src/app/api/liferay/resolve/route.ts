@@ -20,9 +20,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, code: "folder-not-found", message: `Pasta “${body.folderName}” não encontrada no ambiente ${body.environment}.` }, { status: 404 });
     }
 
-    const listing = await listFolderDocuments(folder.id, body.environment);
-    const documents = listing.documents;
     const uniqueValues = Array.from(new Set(body.values));
+    const listing = await listFolderDocuments(folder.id, body.environment, uniqueValues);
+    const documents = listing.documents;
     const resolutions = Object.fromEntries(
       uniqueValues.map((value) => [
         value,
