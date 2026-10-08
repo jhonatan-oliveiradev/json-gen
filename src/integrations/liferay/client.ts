@@ -1,7 +1,7 @@
 import { normalizeKey } from "@/domain/campaign/normalize";
 import type { LiferayDocument, LiferayFolder } from "./types";
 
-const BASE_URL = (process.env.LIFERAY_BASE_URL ?? "https://www.smiles.com.br").replace(/\/$/, "");
+const BASE_URL = (process.env.LIFERAY_BASE_URL ?? "https://portal-green-stg-svc.smiles.com.br").replace(/\/$/, "");
 const SITE_ID = process.env.LIFERAY_SITE_ID ?? "20124";
 
 const headers = {
@@ -58,9 +58,9 @@ export async function findFolderByName(name: string): Promise<LiferayFolder | nu
   const target = normalizeKey(name);
   const exactExpression = `name eq '${escapeOData(name)}'`;
   const queries = [
-    `flatten=true&pageSize=200&search=${encodeURIComponent(exactExpression)}`,
-    `flatten=true&pageSize=200&filter=${encodeURIComponent(exactExpression)}`,
     `flatten=true&pageSize=200&search=${encodeURIComponent(name)}`,
+    `pageSize=200&search=${encodeURIComponent(name)}`,
+    `flatten=true&pageSize=200&filter=${encodeURIComponent(exactExpression)}`,
   ];
 
   let lastError: unknown = null;
