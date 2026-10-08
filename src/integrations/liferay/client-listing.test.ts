@@ -86,6 +86,7 @@ describe("Liferay Headless document listing", () => {
     expect(result.documents[0].contentUrl).toContain("/documents/d/guest/scl_750x500_1-68");
     expect(result.diagnostics[1]).toMatchObject({ rawCount: 3, mappedCount: 1 });
     expect(mock.mock.calls.some((args) => String(args[0]).includes("filter="))).toBe(false);
+    expect(mock.mock.calls.some((args) => String(args[0]).includes("flatten=true&recursive=true&search=SCL"))).toBe(true);
   });
 
   it("does not assume an asset belongs to the folder when metadata has no documentFolderId", async () => {
