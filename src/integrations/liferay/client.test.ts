@@ -37,4 +37,22 @@ describe("liferayConfigFor", () => {
     vi.stubEnv("LIFERAY_STAGING_GREEN_BASE_URL", "https://portal-green-stg-svc.smiles.com.br/documents");
     expect(() => liferayConfigFor("staging-green")).toThrow("HTTPS");
   });
+  it("accepts common Vercel URL input with surrounding quotes or missing scheme", () => {
+    vi.stubEnv("LIFERAY_BASE_URL", ' "https://www.smiles.com.br/" ');
+    expect(liferayConfigFor("production").baseUrl).toBe("https://www.smiles.com.br");
+    vi.stubEnv("LIFERAY_BASE_URL", "www.smiles.com.br");
+    expect(liferayConfigFor("production").baseUrl).toBe("https://www.smiles.com.br");
+  });
+
+  it("reports the exact invalid environment variable without echoing its value", () => {
+    vi.stubEnv("LIFERAY_BASE_URL", "https://%invalid");
+    expect(() => liferayConfigFor("production")).toThrow("LIFERAY_BASE_URL contém um endereço inválido");
+  });
+
+  it("requires numeric site IDs instead of passing invalid paths to the API", () => {
+    vi.stubEnv("LIFERAY_SITE_ID_PRODUCTION", "site-name");
+    expect(() => liferayConfigFor("production")).toThrow("site ID");
+  });
+
+
 });
