@@ -19,7 +19,7 @@ type Resolution =
 type LiferayEnvironment = "production" | "staging-green" | "staging-blue";
 
 type ResolveResponse =
-  | { ok: true; folder: { id: number | string; name: string }; documentCount: number; diagnostics: Array<{ endpoint: string; rawCount: number; mappedCount: number; detail: string }>; resolutions: Record<string, Resolution> }
+  | { ok: true; folder: { id: number | string; name: string }; source: { hostname: string; siteId: string }; documentCount: number; diagnostics: Array<{ endpoint: string; rawCount: number; mappedCount: number; detail: string }>; resolutions: Record<string, Resolution> }
   | { ok: false; code: string; message: string };
 
 const EMPTY_ASSETS: AssetCatalog = { destinations: {}, airlines: {}, destinationErrors: {}, airlineErrors: {} };
@@ -117,6 +117,9 @@ export function JsonGenWorkspace() {
           diagnostics.push(`${carousel}: ${result.message} (${result.code}).`);
           for (const iata of iatas) next.destinationErrors![`${normalizeKey(carousel)}:${iata}`] = "missing";
           continue;
+        }
+        if (!diagnostics.some((message) => message.startsWith("Fonte da consulta:"))) {
+          diagnostics.unshift(`Fonte da consulta: ${result.source.hostname} (site ID ${result.source.siteId}).`);
         }
         if (result.documentCount === 0) {
           diagnostics.push(`${carousel}: pasta "${result.folder.name}" (ID ${result.folder.id}) encontrada, mas nenhum documento utilizável foi retornado.`);
