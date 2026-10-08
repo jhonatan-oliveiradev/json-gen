@@ -1,8 +1,23 @@
 import { normalizeKey } from "@/domain/campaign/normalize";
 import type { LiferayDocument, LiferayFolder } from "./types";
 
-const BASE_URL = (process.env.LIFERAY_BASE_URL ?? "https://portal-green-stg-svc.smiles.com.br").replace(/\/$/, "");
-const SITE_ID = process.env.LIFERAY_SITE_ID ?? "20124";
+export type LiferayEnvironment = "production" | "staging";
+
+function liferayConfigFor(environment: LiferayEnvironment) {
+  const production = environment === "production";
+  return {
+    baseUrl: (
+      production
+        ? process.env.LIFERAY_BASE_URL ?? "https://www.smiles.com.br"
+        : process.env.LIFERAY_STAGING_BASE_URL ?? "https://portal-green-stg-svc.smiles.com.br"
+    ).replace(/\/$/, ""),
+    siteId: (
+      production
+        ? process.env.LIFERAY_SITE_ID_PRODUCTION ?? process.env.LIFERAY_SITE_ID
+        : process.env.LIFERAY_SITE_ID_STAGING ?? process.env.LIFERAY_SITE_ID
+    ) ?? "20124",
+  };
+}
 
 const headers = {
   Accept: "application/json",
@@ -25,9 +40,9 @@ async function getJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function absoluteContentUrl(contentUrl: string): string {
+function absoluteContentUrl(contentUrl: string, baseUrl: string): string {
   if (/^https?:\/\//i.test(contentUrl)) return contentUrl;
-  return new URL(contentUrl, `${BASE_URL}/`).toString();
+  return new URL(contentUrl, `${baseUrl}/`).toString();
 }
 
 function mapFolder(raw: any): LiferayFolder | null {
@@ -37,7 +52,7 @@ function mapFolder(raw: any): LiferayFolder | null {
   return { id, name: String(name) };
 }
 
-function mapDocument(raw: any): LiferayDocument | null {
+function mapDocument(raw: any, baseUrl: string): LiferayDocument | null {
   const id = raw?.id;
   const title = raw?.title ?? raw?.fileName ?? raw?.name;
   const contentUrl = raw?.contentUrl ?? raw?.contentURL;
@@ -45,7 +60,7 @@ function mapDocument(raw: any): LiferayDocument | null {
   return {
     id,
     title: String(title),
-    contentUrl: absoluteContentUrl(String(contentUrl)),
+    contentUrl: absoluteContentUrl(String(contentUrl), baseUrl),
     fileExtension: raw?.fileExtension ? String(raw.fileExtension) : undefined,
   };
 }
@@ -54,7 +69,8 @@ function escapeOData(value: string) {
   return value.replace(/'/g, "''");
 }
 
-export async function findFolderByName(name: string): Promise<LiferayFolder | null> {
+export async function findFolderByName(name: string, environment: LiferayEnvironment = "production"): Promise<LiferayFolder | null> {
+  const { baseUrl, siteId } = liferayConfigFor(environment);
   const target = normalizeKey(name);
   const exactExpression = `name eq '${escapeOData(name)}'`;
   const queries = [
@@ -67,7 +83,7 @@ export async function findFolderByName(name: string): Promise<LiferayFolder | nu
   let completedRequest = false;
   for (const query of queries) {
     try {
-      const data = await getJson<Collection<any>>(`${BASE_URL}/o/headless-delivery/v1.0/sites/${SITE_ID}/document-folders?${query}`);
+      const data = await getJson<Collection<any>>(`${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/document-folders?${query}`);
       completedRequest = true;
       const folders = (data.items ?? []).map(mapFolder).filter((item): item is LiferayFolder => Boolean(item));
       const exact = folders.find((folder) => normalizeKey(folder.name) === target);
@@ -99,11 +115,12 @@ async function readAllPages<T>(firstUrl: string): Promise<T[]> {
   return all;
 }
 
-export async function listFolderDocuments(folderId: number | string): Promise<LiferayDocument[]> {
+export async function listFolderDocuments(folderId: number | string, environment: LiferayEnvironment = "production"): Promise<LiferayDocument[]> {
+  const { baseUrl, siteId } = liferayConfigFor(environment);
   const attempts = [
-    `${BASE_URL}/o/headless-delivery/v1.0/document-folders/${folderId}/documents`,
-    `${BASE_URL}/o/headless-delivery/v1.0/sites/${SITE_ID}/documents?filter=${encodeURIComponent(`documentFolderId eq ${folderId}`)}`,
-    `${BASE_URL}/o/headless-delivery/v1.0/sites/${SITE_ID}/documents?filter=${encodeURIComponent(`folderId eq ${folderId}`)}`,
+    `${baseUrl}/o/headless-delivery/v1.0/document-folders/${folderId}/documents`,
+    `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?filter=${encodeURIComponent(`documentFolderId eq ${folderId}`)}`,
+    `${baseUrl}/o/headless-delivery/v1.0/sites/${siteId}/documents?filter=${encodeURIComponent(`folderId eq ${folderId}`)}`,
   ];
 
   let lastError: unknown = null;
@@ -112,7 +129,7 @@ export async function listFolderDocuments(folderId: number | string): Promise<Li
     try {
       const raw = await readAllPages<any>(url);
       completedRequest = true;
-      const documents = raw.map(mapDocument).filter((item): item is LiferayDocument => Boolean(item));
+      const documents = raw.map((item) => mapDocument(item, baseUrl)).filter((item): item is LiferayDocument => Boolean(item));
       if (documents.length) return documents;
     } catch (error) {
       lastError = error;
@@ -123,4 +140,7 @@ export async function listFolderDocuments(folderId: number | string): Promise<Li
   return [];
 }
 
-export const liferayConfig = { baseUrl: BASE_URL, siteId: SITE_ID };
+export const liferayConfig = {
+  production: liferayConfigFor("production"),
+  staging: liferayConfigFor("staging"),
+};
