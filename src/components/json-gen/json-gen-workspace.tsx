@@ -18,6 +18,17 @@ type Resolution =
 
 type LiferayEnvironment = "production" | "staging-green" | "staging-blue";
 
+type ConnectivityResult = {
+  ok: boolean;
+  stage: "configuration" | "dns" | "connection" | "http";
+  source?: { hostname: string; environment: LiferayEnvironment; siteId: string };
+  httpStatus?: number;
+  type?: string;
+  code?: string;
+  hint?: string;
+  message?: string;
+};
+
 type ResolveResponse =
   | { ok: true; folder: { id: number | string; name: string; numberOfDocuments?: number }; source: { hostname: string; siteId: string }; documentCount: number; diagnostics: Array<{ endpoint: string; rawCount: number; mappedCount: number; detail: string }>; resolutions: Record<string, Resolution> }
   | { ok: false; code: string; message: string };
@@ -64,6 +75,8 @@ export function JsonGenWorkspace() {
   const [environment, setEnvironment] = useState<LiferayEnvironment>("production");
   const [assets, setAssets] = useState<AssetCatalog>(EMPTY_ASSETS);
   const [resolving, setResolving] = useState(false);
+  const [checkingConnection, setCheckingConnection] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<ConnectivityResult | null>(null);
   const [resolvedOnce, setResolvedOnce] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [manualInputs, setManualInputs] = useState<Record<string, string>>({});
@@ -90,6 +103,29 @@ export function JsonGenWorkspace() {
     setManualMessage("");
     setResolvedOnce(false);
     setError(null);
+    setConnectionResult(null);
+  }
+
+  async function testConnection() {
+    setCheckingConnection(true);
+    setConnectionResult(null);
+    try {
+      const response = await fetch("/api/liferay/connectivity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ environment }),
+      });
+      const data = await response.json() as ConnectivityResult;
+      setConnectionResult(data);
+    } catch {
+      setConnectionResult({
+        ok: false,
+        stage: "connection",
+        hint: "O JSON Gen não conseguiu chamar sua própria rota de diagnóstico. Confira os logs da Vercel.",
+      });
+    } finally {
+      setCheckingConnection(false);
+    }
   }
 
   async function handleFile(file: File) {
@@ -108,6 +144,7 @@ export function JsonGenWorkspace() {
       setManualMessage("");
       setResolutionMessages([]);
       setResolvedOnce(false);
+      setConnectionResult(null);
     } catch (e) {
       setCampaign(null);
       setError(e instanceof Error ? e.message : "Não foi possível ler a planilha.");
@@ -330,9 +367,34 @@ export function JsonGenWorkspace() {
                     setResolvedOnce(false);
                   }} />
                 </label>
-                <button className="mt-4 h-10 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-50" disabled={resolving} onClick={() => void resolveAssets()}>
-                  {resolving ? "Consultando Liferay…" : "Resolver assets"}
-                </button>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button
+                    className="h-10 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground disabled:opacity-50"
+                    disabled={checkingConnection || resolving}
+                    onClick={() => void testConnection()}
+                  >
+                    {checkingConnection ? "Verificando rede…" : "Testar conexão"}
+                  </button>
+                  <button className="h-10 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-50" disabled={resolving || checkingConnection} onClick={() => void resolveAssets()}>
+                    {resolving ? "Consultando Liferay…" : "Resolver assets"}
+                  </button>
+                </div>
+                {connectionResult ? (
+                  <div role="status" className="mt-3 rounded-xl border border-border bg-background p-3 text-xs leading-5">
+                    <p className="font-semibold">
+                      {connectionResult.ok ? "Conexão estabelecida com a API" : "Conexão não concluída"}
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      {connectionResult.source?.hostname ?? environment}
+                      {connectionResult.source?.siteId ? ` · Site ${connectionResult.source.siteId}` : ""}
+                      {connectionResult.httpStatus ? ` · HTTP ${connectionResult.httpStatus}` : ""}
+                      {connectionResult.code ? ` · ${connectionResult.type}/${connectionResult.code}` : ""}
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      {connectionResult.hint ?? connectionResult.message ?? "Falha de diagnóstico."}
+                    </p>
+                  </div>
+                ) : null}
                 {environment === "production" && resolvedOnce && Object.keys(assets.destinations).length === 0 ? (
                   <div className="mt-3 grid gap-2 rounded-xl border border-border bg-background p-3">
                     <p className="text-xs leading-5 text-muted-foreground">
