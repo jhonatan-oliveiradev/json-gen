@@ -127,6 +127,19 @@ describe("Liferay Headless document listing", () => {
     expect(result.diagnostics[1].detail).toContain("Search index is unavailable");
   });
 
+  it("stops immediately on network/DNS failure instead of trying more endpoints", async () => {
+    const networkCause = Object.assign(new Error("getaddrinfo ENOTFOUND"), { code: "ENOTFOUND" });
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("fetch failed", { cause: networkCause });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(findFolderByName("aer1525_offers_01_v1", "staging-green")).rejects.toThrow("DNS/ENOTFOUND");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(listFolderDocuments(77, "staging-green", ["SCL"])).rejects.toThrow("DNS/ENOTFOUND");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("identifies redirected authentication responses", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: false,
