@@ -1,6 +1,7 @@
 export type LiferayFolder = {
   id: number | string;
   name: string;
+  numberOfDocuments?: number;
 };
 
 export type LiferayDocument = {
