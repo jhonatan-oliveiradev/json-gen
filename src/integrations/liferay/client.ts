@@ -1,5 +1,6 @@
 import { normalizeKey } from "@/domain/campaign/normalize";
 import type { LiferayDocument, LiferayFolder } from "./types";
+import { describeLiferayNetworkError } from "./network-errors";
 
 export type LiferayEnvironment = "production" | "staging-green" | "staging-blue";
 
@@ -84,7 +85,8 @@ async function getJson<T>(url: string): Promise<T> {
   try {
     response = await fetch(url, { headers, cache: "no-store", redirect: "manual" });
   } catch (error) {
-    throw new Error(`Falha de rede ao consultar o Liferay: ${error instanceof Error ? error.message : "conexão indisponível"}.`);
+    const diagnostic = describeLiferayNetworkError(error);
+    throw new Error(`Falha de rede (${diagnostic.type}/${diagnostic.code}): ${diagnostic.hint}`);
   }
   if (response.status >= 300 && response.status < 400) {
     throw new Error(`Liferay redirecionou a consulta HTTP ${response.status} (possível login/SSO).`);
