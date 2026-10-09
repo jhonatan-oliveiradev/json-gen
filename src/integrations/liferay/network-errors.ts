@@ -2,6 +2,13 @@
 export type LiferayNetworkCode =
   | "DNS" | "TIMEOUT" | "TLS" | "CONNECTION" | "UNKNOWN";
 
+export class LiferayNetworkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LiferayNetworkError";
+  }
+}
+
 type ErrorLike = {
   code?: unknown;
   cause?: unknown;
