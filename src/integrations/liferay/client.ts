@@ -1,5 +1,6 @@
 import { normalizeKey } from "@/domain/campaign/normalize";
 import type { LiferayDocument, LiferayFolder } from "./types";
+import { describeLiferayNetworkError, LiferayNetworkError } from "./network-errors";
 
 export type LiferayEnvironment = "production" | "staging-green" | "staging-blue";
 
@@ -82,9 +83,10 @@ type Collection<T> = {
 async function getJson<T>(url: string): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(url, { headers, cache: "no-store", redirect: "manual" });
+    response = await fetch(url, { headers, cache: "no-store", redirect: "manual", signal: AbortSignal.timeout(8000) });
   } catch (error) {
-    throw new Error(`Falha de rede ao consultar o Liferay: ${error instanceof Error ? error.message : "conexão indisponível"}.`);
+    const diagnostic = describeLiferayNetworkError(error);
+    throw new LiferayNetworkError(`Falha de rede (${diagnostic.type}/${diagnostic.code}): ${diagnostic.hint}`);
   }
   if (response.status >= 300 && response.status < 400) {
     throw new Error(`Liferay redirecionou a consulta HTTP ${response.status} (possível login/SSO).`);
@@ -122,7 +124,13 @@ function mapFolder(raw: any): LiferayFolder | null {
   const id = raw?.id ?? raw?.documentFolderId;
   const name = raw?.name ?? raw?.title;
   if (id === undefined || !name) return null;
-  return { id, name: String(name) };
+  const reportedCount = raw?.numberOfDocuments;
+  return {
+    id,
+    name: String(name),
+    numberOfDocuments: typeof reportedCount === "number" && Number.isInteger(reportedCount) && reportedCount >= 0
+      ? reportedCount : undefined,
+  };
 }
 
 function mapDocument(raw: any, baseUrl: string): LiferayDocument | null {
@@ -162,6 +170,7 @@ export async function findFolderByName(name: string, environment: LiferayEnviron
       const exact = folders.find((folder) => normalizeKey(folder.name) === target);
       if (exact) return exact;
     } catch (error) {
+      if (error instanceof LiferayNetworkError) throw error;
       lastError = error;
     }
   }
@@ -215,6 +224,7 @@ export async function listFolderDocuments(
     });
     if (documents.length) return { documents, diagnostics };
   } catch (error) {
+    if (error instanceof LiferayNetworkError) throw error;
     diagnostics.push({
       endpoint: "document-folders/{id}/documents",
       rawCount: 0,
@@ -246,7 +256,8 @@ export async function listFolderDocuments(
       try {
         // Search results are paginated; up to 3 pages per term (600 records).
         const raw = await readAllPages<any>(url, 3);
-        const inFolder = raw.filter((item) => String(item.documentFolderId ?? "") === String(folderId));
+        const withFolderId = raw.filter((item) => item.documentFolderId !== null && item.documentFolderId !== undefined);
+        const inFolder = withFolderId.filter((item) => String(item.documentFolderId) === String(folderId));
         const documents = inFolder.map((item) => mapDocument(item, baseUrl))
           .filter((item): item is LiferayDocument => Boolean(item));
         return {
@@ -257,7 +268,7 @@ export async function listFolderDocuments(
             mappedCount: documents.length,
             detail: raw.length === 0
               ? "Busca do site vazia para este termo."
-              : `${inFolder.length} item(ns) pertencem à pasta ${folderId}; ${documents.length} possuem ID, título e URL.`,
+              : `${withFolderId.length}/${raw.length} item(ns) possuem documentFolderId; ${inFolder.length} pertencem à pasta ${folderId}; ${documents.length} possuem ID, título e URL.`,
           } satisfies DocumentDiscoveryDiagnostic,
         };
       } catch (error) {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { listFolderDocuments } from "./client";
+import { findFolderByName, listFolderDocuments } from "./client";
 
 function apiResult(items: unknown[]) {
   return {
@@ -66,6 +66,18 @@ describe("Liferay Headless document listing", () => {
     expect(result.diagnostics.every((item) => item.detail.includes("403"))).toBe(true);
   });
 
+  it("preserves the document count reported by a named folder", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => apiResult([
+      { id: 77, name: "aer1525_offers_01_v1", numberOfDocuments: 6 },
+    ])));
+    const result = await findFolderByName("aer1525_offers_01_v1", "staging-green");
+    expect(result).toEqual({
+      id: 77,
+      name: "aer1525_offers_01_v1",
+      numberOfDocuments: 6,
+    });
+  });
+
   it("finds an asset by a site search and accepts only its exact folder ID", async () => {
     const mock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -85,6 +97,7 @@ describe("Liferay Headless document listing", () => {
     expect(result.documents.map((doc) => doc.id)).toEqual([101]);
     expect(result.documents[0].contentUrl).toContain("/documents/d/guest/scl_750x500_1-68");
     expect(result.diagnostics[1]).toMatchObject({ rawCount: 3, mappedCount: 1 });
+    expect(result.diagnostics[1].detail).toContain("2/3 item(ns) possuem documentFolderId");
     expect(mock.mock.calls.some((args) => String(args[0]).includes("filter="))).toBe(false);
     expect(mock.mock.calls.some((args) => String(args[0]).includes("flatten=true&recursive=true&search=SCL"))).toBe(true);
   });
@@ -112,6 +125,19 @@ describe("Liferay Headless document listing", () => {
     const result = await listFolderDocuments(77, "staging-green", ["SCL"]);
     expect(result.diagnostics[1].detail).toContain("HTTP 400");
     expect(result.diagnostics[1].detail).toContain("Search index is unavailable");
+  });
+
+  it("stops immediately on network/DNS failure instead of trying more endpoints", async () => {
+    const networkCause = Object.assign(new Error("getaddrinfo ENOTFOUND"), { code: "ENOTFOUND" });
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("fetch failed", { cause: networkCause });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(findFolderByName("aer1525_offers_01_v1", "staging-green")).rejects.toThrow("DNS/ENOTFOUND");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(listFolderDocuments(77, "staging-green", ["SCL"])).rejects.toThrow("DNS/ENOTFOUND");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("identifies redirected authentication responses", async () => {
