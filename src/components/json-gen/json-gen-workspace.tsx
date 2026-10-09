@@ -19,7 +19,7 @@ type Resolution =
 type LiferayEnvironment = "production" | "staging-green" | "staging-blue";
 
 type ResolveResponse =
-  | { ok: true; folder: { id: number | string; name: string }; source: { hostname: string; siteId: string }; documentCount: number; diagnostics: Array<{ endpoint: string; rawCount: number; mappedCount: number; detail: string }>; resolutions: Record<string, Resolution> }
+  | { ok: true; folder: { id: number | string; name: string; numberOfDocuments?: number }; source: { hostname: string; siteId: string }; documentCount: number; diagnostics: Array<{ endpoint: string; rawCount: number; mappedCount: number; detail: string }>; resolutions: Record<string, Resolution> }
   | { ok: false; code: string; message: string };
 
 const EMPTY_ASSETS: AssetCatalog = { destinations: {}, airlines: {}, destinationErrors: {}, airlineErrors: {} };
@@ -80,6 +80,18 @@ export function JsonGenWorkspace() {
     [resolvedOnce, campaign, activeOffers, activeGroups, assets],
   );
 
+  function switchEnvironment(next: LiferayEnvironment) {
+    if (next === environment) return;
+    setEnvironment(next);
+    setAssets(EMPTY_ASSETS);
+    setManualOverrides({});
+    setManualInputs({});
+    setResolutionMessages([]);
+    setManualMessage("");
+    setResolvedOnce(false);
+    setError(null);
+  }
+
   async function handleFile(file: File) {
     setError(null);
     try {
@@ -122,7 +134,7 @@ export function JsonGenWorkspace() {
           diagnostics.unshift(`Fonte da consulta: ${result.source.hostname} (site ID ${result.source.siteId}).`);
         }
         if (result.documentCount === 0) {
-          diagnostics.push(`${carousel}: pasta "${result.folder.name}" (ID ${result.folder.id}) encontrada, mas nenhum documento utilizável foi retornado.`);
+          diagnostics.push(`${carousel}: pasta "${result.folder.name}" (ID ${result.folder.id}) encontrada; documentos informados pela pasta: ${result.folder.numberOfDocuments ?? "não informado"}; nenhum documento utilizável foi retornado.`);
           for (const detail of result.diagnostics ?? []) {
             diagnostics.push(`  ${detail.endpoint}: ${detail.detail} (recebidos: ${detail.rawCount}; utilizáveis: ${detail.mappedCount}).`);
           }
@@ -141,7 +153,7 @@ export function JsonGenWorkspace() {
         for (const airline of campaign.airlines) next.airlineErrors![normalizeKey(airline)] = "missing";
       } else {
         if (airlineResult.documentCount === 0) {
-          diagnostics.push(`Logos: pasta "${airlineResult.folder.name}" (ID ${airlineResult.folder.id}) encontrada, mas sem documentos utilizáveis.`);
+          diagnostics.push(`Logos: pasta "${airlineResult.folder.name}" (ID ${airlineResult.folder.id}) encontrada; documentos informados pela pasta: ${airlineResult.folder.numberOfDocuments ?? "não informado"}; nenhum documento utilizável foi retornado.`);
           for (const detail of airlineResult.diagnostics ?? []) {
             diagnostics.push(`  ${detail.endpoint}: ${detail.detail} (recebidos: ${detail.rawCount}; utilizáveis: ${detail.mappedCount}).`);
           }
@@ -274,20 +286,17 @@ export function JsonGenWorkspace() {
                   disabled={resolving}
                   className="h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                   value={environment}
-                  onChange={(event) => {
-                    setEnvironment(event.target.value as LiferayEnvironment);
-                    setAssets(EMPTY_ASSETS);
-                    setManualOverrides({});
-                    setManualInputs({});
-                    setResolutionMessages([]);
-                    setManualMessage("");
-                    setResolvedOnce(false);
-                  }}
+                  onChange={(event) => switchEnvironment(event.target.value as LiferayEnvironment)}
                 >
                   <option value="production">Produção (www.smiles.com.br)</option>
                   <option value="staging-green">Staging Green</option>
                   <option value="staging-blue">Staging Blue</option>
                 </select>
+                {environment === "production" ? (
+                  <span className="text-xs leading-5 text-muted-foreground">
+                    Seus links seguem o padrão portal-green-stg-svc.smiles.com.br? Eles pertencem ao Staging Green, não a Produção.
+                  </span>
+                ) : null}
                 <span className="text-xs leading-5 text-muted-foreground">
                   O JSON usa a URL real retornada pelo Liferay, sem alterar o domínio.
                   {environment === "production"
@@ -324,6 +333,20 @@ export function JsonGenWorkspace() {
                 <button className="mt-4 h-10 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-50" disabled={resolving} onClick={() => void resolveAssets()}>
                   {resolving ? "Consultando Liferay…" : "Resolver assets"}
                 </button>
+                {environment === "production" && resolvedOnce && Object.keys(assets.destinations).length === 0 ? (
+                  <div className="mt-3 grid gap-2 rounded-xl border border-border bg-background p-3">
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Nenhuma imagem foi encontrada em Produção. Se as imagens da campanha foram publicadas no portal Green, teste a biblioteca correta antes de investigar a API.
+                    </p>
+                    <button
+                      className="h-9 justify-self-start rounded-lg border border-primary/30 bg-primary/10 px-3 text-xs font-semibold text-primary"
+                      onClick={() => switchEnvironment("staging-green")}
+                      disabled={resolving}
+                    >
+                      Selecionar Staging Green
+                    </button>
+                  </div>
+                ) : null}
                 {resolutionMessages.length > 0 ? (
                   <div role="status" className="mt-3 grid max-h-72 gap-1 overflow-y-auto rounded-xl border border-warning/30 bg-warning/5 p-3 text-xs leading-5 text-muted-foreground">
                     <strong className="text-foreground">Diagnóstico da consulta</strong>
