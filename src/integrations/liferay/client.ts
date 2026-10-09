@@ -1,6 +1,6 @@
 import { normalizeKey } from "@/domain/campaign/normalize";
 import type { LiferayDocument, LiferayFolder } from "./types";
-import { describeLiferayNetworkError } from "./network-errors";
+import { describeLiferayNetworkError, LiferayNetworkError } from "./network-errors";
 
 export type LiferayEnvironment = "production" | "staging-green" | "staging-blue";
 
@@ -83,10 +83,10 @@ type Collection<T> = {
 async function getJson<T>(url: string): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(url, { headers, cache: "no-store", redirect: "manual" });
+    response = await fetch(url, { headers, cache: "no-store", redirect: "manual", signal: AbortSignal.timeout(8000) });
   } catch (error) {
     const diagnostic = describeLiferayNetworkError(error);
-    throw new Error(`Falha de rede (${diagnostic.type}/${diagnostic.code}): ${diagnostic.hint}`);
+    throw new LiferayNetworkError(`Falha de rede (${diagnostic.type}/${diagnostic.code}): ${diagnostic.hint}`);
   }
   if (response.status >= 300 && response.status < 400) {
     throw new Error(`Liferay redirecionou a consulta HTTP ${response.status} (possível login/SSO).`);
@@ -170,6 +170,7 @@ export async function findFolderByName(name: string, environment: LiferayEnviron
       const exact = folders.find((folder) => normalizeKey(folder.name) === target);
       if (exact) return exact;
     } catch (error) {
+      if (error instanceof LiferayNetworkError) throw error;
       lastError = error;
     }
   }
@@ -223,6 +224,7 @@ export async function listFolderDocuments(
     });
     if (documents.length) return { documents, diagnostics };
   } catch (error) {
+    if (error instanceof LiferayNetworkError) throw error;
     diagnostics.push({
       endpoint: "document-folders/{id}/documents",
       rawCount: 0,
